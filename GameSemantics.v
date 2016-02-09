@@ -20,11 +20,17 @@ Section Arena.
 
   Lemma inv_preserves_qa : 
     forall (l : labelling) (m : M) (qa : QA), snd (inv l m) = snd (l m).
-  Proof. admit. Qed.
+  Proof.
+    intros l m QA. unfold inv. destruct (l m). destruct o; reflexivity.
+  Qed.
 
   Lemma inv_bijective_po : 
     forall (l : labelling) (m n : M), fst (inv l m) = fst (inv l n) -> fst (l m) = fst (l n).
-  Proof. admit. Qed.
+  Proof.
+    intros l m n H. unfold inv in H. destruct (l m). destruct (l n).
+      destruct o. destruct o0. simpl in *. reflexivity. simpl in *. inversion H.
+                  destruct o0. simpl in *. inversion H. simpl in *. reflexivity.
+  Qed.
 
   Definition enabling := option M -> M -> Prop.
   
@@ -42,7 +48,7 @@ Section Arena.
 
   Inductive arena : labelling -> enabling -> Prop := 
     mk_arena (l : labelling) (e : enabling) : 
-      start_OQ l e /\ A_to_Q l e /\ P_to_O l e (*/\ unique_justifier l e*) -> arena l e.
+      start_OQ l e /\ A_to_Q l e /\ P_to_O l e /\ unique_justifier l e -> arena l e.
 
   Ltac deconj :=    
     match goal with
@@ -57,10 +63,10 @@ Section Arena.
 
   Definition arena_PO (l : labelling) (e : enabling) : arena l e -> P_to_O l e.
   Proof. intro A. inversion A. deconj. assumption. Qed.
-(*
+
   Definition arena_unique_justifier (l : labelling) (e : enabling) : arena l e -> unique_justifier l e.
   Proof. intro A. inversion A. deconj. assumption. Qed.
-*)
+
 End Arena.
 
 Module Type ARENA.
@@ -73,6 +79,46 @@ End ARENA.
 Module Type TYPE.
   Parameter T : Type.
 End TYPE.
+
+Module EmptyArena.
+
+  Inductive M_ := .
+  Definition M := M_.
+
+  Definition lab : labelling M := fun n =>
+    match n with end.
+
+  Inductive enab_ : enabling M  := .
+  Definition enab := enab_.
+ 
+  Lemma start_OQ_ok : start_OQ M lab enab.
+  Proof.
+    unfold start_OQ. intros n E. inversion E.
+  Qed.
+
+  Lemma A_to_Q_ok : A_to_Q M lab enab.
+  Proof.
+    unfold A_to_Q. intros m n H _. inversion H.
+  Qed.
+
+  Lemma P_to_O_ok : P_to_O M lab enab.
+  Proof.
+    unfold P_to_O. intros m n H. inversion H.
+  Qed.
+
+  Lemma unique_justifier_ok : unique_justifier M lab enab.
+  Proof.
+    unfold unique_justifier. intros l m n H G. inversion H. 
+  Qed.
+           
+  Hint Resolve start_OQ_ok A_to_Q_ok P_to_O_ok unique_justifier_ok.
+
+  Definition arena : arena M lab enab.
+  Proof.
+    apply mk_arena; split; auto.
+  Qed.
+
+End EmptyArena.
 
 Module ConstArena (T : TYPE) : ARENA.
 
@@ -109,13 +155,13 @@ Module ConstArena (T : TYPE) : ARENA.
     unfold P_to_O. intros m n H. unfold not. intro E. inversion H as [H0|H1]. 
       rewrite <- H2 in E. rewrite <- H0 in E. inversion E.
   Qed.
-(*
+
   Lemma unique_justifier_ok : unique_justifier M lab enab.
   Proof.
     unfold unique_justifier. intros l m n G H. inversion G. inversion H. reflexivity.
   Qed.
-*)           
-  Hint Resolve start_OQ_ok A_to_Q_ok P_to_O_ok (*unique_justifier_ok*).
+           
+  Hint Resolve start_OQ_ok A_to_Q_ok P_to_O_ok unique_justifier_ok.
 
   Definition arena : arena M lab enab.
   Proof.
@@ -165,7 +211,7 @@ Module ProdArena (X Y : ARENA) : ARENA.
   Qed.
 
   Lemma A_to_Q_ok : A_to_Q M lab enab.
-  Proof.
+  Proof. 
     unfold A_to_Q. intros m n E A. destruct n;
       (inversion_clear E; 
          try apply (arena_AQ X.M X.lab X.enab X.arena) in H; 
@@ -183,7 +229,7 @@ Module ProdArena (X Y : ARENA) : ARENA.
       rewrite <- H0 in Eq; simpl in Eq; assumption
     ).
   Qed.
-(*
+
   Lemma unique_justifier_ok : unique_justifier M lab enab.
   Proof. 
     unfold unique_justifier. intros l m n EL EM. destruct n; (
@@ -195,8 +241,8 @@ Module ProdArena (X Y : ARENA) : ARENA.
       ]
     ).
   Qed.
-*)
-  Hint Resolve start_OQ_ok A_to_Q_ok P_to_O_ok (*unique_justifier_ok*).
+
+  Hint Resolve start_OQ_ok A_to_Q_ok P_to_O_ok unique_justifier_ok.
 
   Definition arena : arena M lab enab.
   Proof.
@@ -207,20 +253,22 @@ End ProdArena.
 
 Module ExpArena (X Y : ARENA) : ARENA.
 
-  Inductive M_ := Dom : X.M -> M_ | Cod : Y.M -> M_.
+  Inductive M_ := Dom : X.M * Y.M -> M_ | Cod : Y.M -> M_.
 
   Definition M := M_.
 
   Definition lab : labelling M := fun n =>
     match n with
-    | Dom x => inv X.M X.lab x
-    | Cod y => Y.lab y
+    | Dom (x, _) => inv X.M X.lab x
+    | Cod  y     => Y.lab y
     end.
 
   Inductive enab_ : enabling M :=
-  | DomE  : forall (x y : X.M), X.enab (Some x) y -> enab_ (Some (Dom x)) (Dom y)
+  | DomE  : forall (x y : X.M) (z : Y.M), 
+      Y.enab None z -> X.enab (Some x) y -> enab_ (Some (Dom (x, z))) (Dom (y, z))
   | CodE  : forall (x y : Y.M), Y.enab (Some x) y -> enab_ (Some (Cod x)) (Cod y)
-  | Codom : forall (x : X.M) (y : Y.M), X.enab None x -> Y.enab None y -> enab_ (Some (Cod y)) (Dom x)
+  | Codom : forall (x : X.M) (y z : Y.M), 
+      X.enab None x -> Y.enab None y -> enab_ (Some (Cod y)) (Dom (x, y))
   | Start : forall (y : Y.M), Y.enab None y -> enab_ None (Cod y).
 
   Definition enab := enab_.
@@ -235,10 +283,10 @@ Module ExpArena (X Y : ARENA) : ARENA.
   Qed.
 
   Lemma A_to_Q_ok : A_to_Q M lab enab.
-  Proof.
+  Proof. 
     unfold A_to_Q. intros m n E Eq. inversion E.
-      apply (arena_AQ X.M X.lab X.enab X.arena) in H0.      
-        rewrite <- H1 in Eq. unfold l_QA in *. simpl in *.
+      apply (arena_AQ X.M X.lab X.enab X.arena) in H1.      
+        rewrite <- H2 in Eq. unfold l_QA in *. simpl in *.
         rewrite (inv_preserves_qa X.M) in *; auto.
       apply (arena_AQ Y.M Y.lab Y.enab Y.arena) in H0.
         rewrite <- H1 in Eq. unfold l_QA in *. simpl in *.
@@ -250,8 +298,8 @@ Module ExpArena (X Y : ARENA) : ARENA.
   Lemma P_to_O_ok : P_to_O M lab enab.
   Proof.
     unfold P_to_O. intros m n E. unfold not. intro Eq. inversion E.
-      apply (arena_PO X.M X.lab X.enab X.arena) in H0. unfold not in H0.
-        unfold l_OP in *. rewrite <- H in Eq. rewrite <- H1 in Eq. simpl in Eq.
+      apply (arena_PO X.M X.lab X.enab X.arena) in H1. unfold not in H1.
+        unfold l_OP in *. rewrite <- H in Eq. rewrite <- H2 in Eq. simpl in Eq.
         apply (inv_bijective_po X.M) in Eq. auto.
       apply (arena_PO Y.M Y.lab Y.enab Y.arena) in H0. unfold not in H0.
         unfold l_OP in *. rewrite <- H in Eq. rewrite <- H1 in Eq. simpl in Eq. auto.
@@ -261,28 +309,27 @@ Module ExpArena (X Y : ARENA) : ARENA.
         rewrite H5 in Eq. unfold inv in Eq. rewrite H3 in Eq. simpl in Eq. inversion Eq.
   Qed.
 
-(*
   Lemma unique_justifier_ok : unique_justifier M lab enab.
   Proof. 
     unfold unique_justifier. intros l m n El Em. inversion El. inversion Em. 
-      apply (arena_unique_justifier X.M X.lab X.enab X.arena x0) in H0. 
-        rewrite H0. reflexivity.
-        rewrite <- H1 in H4. inversion H4. rewrite H6 in H3. assumption.
-      rewrite <- H4 in H1. inversion H1.
-      rewrite <- H1 in H5. inversion H5. rewrite H7 in H3.
-        apply (arena_start X.M X.lab X.enab X.arena) in H3. 
-        inversion H3. apply H8 in H0. inversion H0.
+      apply (arena_unique_justifier X.M X.lab X.enab X.arena x0) in H1. 
+        rewrite <- H2 in H6. inversion H6. rewrite H1. reflexivity.
+        rewrite <- H2 in H6. inversion H6. rewrite <- H8. assumption. 
+      rewrite <- H5 in H2. inversion H2.
+      rewrite <- H2 in H6. inversion H6. rewrite H8 in H4.
+        apply (arena_start X.M X.lab X.enab X.arena) in H4. 
+        inversion H4. apply H10 in H1. inversion H1.
       rewrite <- H1 in Em. inversion Em. 
         apply (arena_unique_justifier Y.M Y.lab Y.enab Y.arena x0) in H0. 
         rewrite H0. reflexivity. assumption.
       rewrite <- H2 in El. rewrite <- H2 in Em. 
         inversion El. rewrite <- H3 in H. inversion H.
-        inversion Em. apply (arena_start X.M X.lab X.enab X.arena) in H5. 
-          inversion H5. apply H11 in H9. inversion H9.
+        inversion Em. apply (arena_start X.M X.lab X.enab X.arena) in H0.
+          inversion H0. apply H14 in H12. inversion H12. 
+          reflexivity.          
   Qed.
-*)
 
-  Hint Resolve start_OQ_ok A_to_Q_ok P_to_O_ok (*unique_justifier_ok*).
+  Hint Resolve start_OQ_ok A_to_Q_ok P_to_O_ok unique_justifier_ok.
 
   Definition arena : arena M lab enab.
   Proof.
